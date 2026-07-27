@@ -6,7 +6,8 @@ load_dotenv()
 
 import streamlit as st
 
-st.set_page_config(page_title="YV Search (Demo)", page_icon="🔎")
+st.set_page_config(page_title="MVP (Demo)", page_icon="🔎")
+# st.set_page_config(page_title="YV Search (Demo)", page_icon="🔎")
 import pdfplumber
 import re
 from pathlib import Path
@@ -16,9 +17,8 @@ from langchain_openai import ChatOpenAI
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.vectorstores import FAISS
 from langchain_huggingface import HuggingFaceEmbeddings
-from langchain_openai import ChatOpenAI
-
-llm = ChatOpenAI(model="gpt-4.1-mini", temperature=0)  # solid + cheap-ish
+from langchain_core.documents import Document
+# llm = ChatOpenAI(model="gpt-4.1-mini", temperature=0)  # solid + cheap-ish
 
 
 def generate_answer(question: str, context: str) -> str:
@@ -119,7 +119,8 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-st.title("🔎 YV Search (Demo)")
+# st.title("🔎 YV Search (Demo)")
+st.title("🔎 MVP Search (Demo)")
 st.caption("Hallucination-resistant RAG assistant over example technical documentation")
 # st.caption(f"{PROJECT_CODENAME} • YV-hard work defines it")
 
@@ -228,65 +229,103 @@ def extract_text_from_pdf(pdf_path: str) -> str:
 
 
 # -------------------------------
-# Build Vector Store
+# Per File Document Helper
 # -------------------------------
-def build_vectorstore(text: str):
+def build_vectorstore_from_documents(documents):
     splitter = RecursiveCharacterTextSplitter(
-        chunk_size=800,
-        chunk_overlap=150,
+        chunk_size=600,
+        chunk_overlap=50,
         separators=["\n\n", "\n", ".", " ", ""],
     )
-    chunks = splitter.split_text(text)
+
+    chunks = splitter.split_documents(documents)
 
     embeddings = HuggingFaceEmbeddings(
         model_name="sentence-transformers/all-MiniLM-L6-v2"
     )
 
-    vs = FAISS.from_texts(chunks, embeddings)
+    vs = FAISS.from_documents(chunks, embeddings)
+
     return vs, chunks
+# -------------------------------
+# Build Vector Store
+# -------------------------------
 
 
 # -------------------------------
 # Load PDFs at startup
 # -------------------------------
+from pathlib import Path
+import streamlit as st
+
 BASE_DIR = Path(__file__).resolve().parent
+DOCS_DIR = BASE_DIR / "docs"
 
-PDF_PATHS = [
-    BASE_DIR / "docs" / "mobile_sync_troubleshooting_generic_v1.pdf",
-    BASE_DIR / "docs" / "manage_group_permissions_generic_v1.pdf",
-]
+SUPPORTED_EXTENSIONS = [".pdf", ".txt", ".md"]
 
+DOC_PATHS = sorted(
+    p for p in DOCS_DIR.iterdir()
+    if p.is_file() and p.suffix.lower() in SUPPORTED_EXTENSIONS
+)
+def extract_text_from_file(path: Path) -> str:
+    suffix = path.suffix.lower()
+
+    if suffix == ".pdf":
+        return extract_text_from_pdf(str(path))
+
+    if suffix in [".txt", ".md"]:
+        return path.read_text(encoding="utf-8", errors="ignore")
+
+    return ""
 
 st.session_state.setdefault("vectorstore", None)
 st.session_state.setdefault("chunks", None)
 
 if st.session_state.vectorstore is None:
-    with st.spinner("Loading PDF knowledge base..."):
-        all_text = []
+    with st.spinner("Loading knowledge base..."):
+        documents = []
 
-        for path in PDF_PATHS:
-            if not path.exists():
-                st.error(f"Missing file: {path}")
-                st.stop()
+        if not DOCS_DIR.exists():
+            st.error(f"Missing docs folder: {DOCS_DIR}")
+            st.stop()
 
-            all_text.append(extract_text_from_pdf(str(path)))
-            all_text.append("\n\n=== DOCUMENT BREAK ===\n\n")
+        if not DOC_PATHS:
+            st.error(f"No supported files found in: {DOCS_DIR}")
+            st.stop()
 
-        extracted_text = "".join(all_text)
+        for path in DOC_PATHS:
+            text = extract_text_from_file(path)
 
-        if len(extracted_text) < 200:
-            st.error("Very little text detected in your PDFs.")
-        else:
-            vs, chunks = build_vectorstore(extracted_text)
-            st.session_state.vectorstore = vs
-            st.session_state.chunks = chunks
-            st.success(f"Knowledge base loaded ✅ ({len(chunks)} chunks)")
+            if text.strip():
+                documents.append(
+                    Document(
+                        page_content=text,
+                        metadata={"source": path.name}
+                    )
+                )
 
+        if not documents:
+            st.error("Very little text detected in your documents.")
+            st.stop()
+
+        vs, chunks = build_vectorstore_from_documents(documents)
+
+        st.session_state.vectorstore = vs
+        st.session_state.chunks = chunks
+
+        st.success(
+            f"Knowledge base loaded ✅ ({len(chunks)} chunks from {len(DOC_PATHS)} files)"
+        )
 # -------------------------------
 # Ask Question
 # -------------------------------
-question = st.text_input("Question", placeholder="e.g., How do I sync data on mobile?")
+with st.form("search_form"):
+    question = st.text_input(
+        "Question",
+        placeholder="e.g., How do I sync data on mobile?"
+    )
 
+    submitted = st.form_submit_button("Ask MVP Search")
 
 def generate_answer(question: str, context: str) -> str:
     llm = ChatOpenAI(
@@ -311,7 +350,8 @@ Return a concise answer (3-6 sentences). If steps exist, use bullets."""
     return resp.content.strip()
 
 
-if st.button("Ask YV Search") and question:
+# if st.button("Ask YV Search") and question:
+if submitted and question:
     if st.session_state.vectorstore is None:
         st.error("Knowledge base not loaded.")
         st.stop()
@@ -329,16 +369,18 @@ if st.button("Ask YV Search") and question:
 
     kept = []
     for d, score in docs_with_scores:
-        text = d.page_content.replace("=== DOCUMENT BREAK ===", "").strip()
+        text = d.page_content.strip()
+        source = d.metadata.get("source","Unknown Source")
+
         if text and score <= max_distance:
-            kept.append((text, score))
+            kept.append((text, score, source ))
 
     st.markdown(
         f'<div class="chat-bubble user"><b>You Asked:</b><br>{question}</div>',
         unsafe_allow_html=True,
     )
 
-    kept_texts = [t for t, _ in kept]
+    kept_texts = [t for t, _, _ in kept]
     passes_keywords = keyword_overlap_ok(question, kept_texts)
     passes_scope = scope_coverage_ok(question, kept_texts)
     passes_multi = multi_intent_coverage_ok(question, kept_texts)
@@ -371,7 +413,7 @@ if st.button("Ask YV Search") and question:
         st.stop()
 
     # Build context once
-    context = "\n\n".join(t for t, _ in kept)
+    context = "\n\n".join(t for t, _, _ in kept)
 
     # Optional LLM generation with safe fallback
     answer = None
@@ -395,15 +437,32 @@ if st.button("Ask YV Search") and question:
             '<div class="chat-bubble bot bot-header">Retrieved documentation context:</div>',
             unsafe_allow_html=True,
         )
-        st.markdown(
-            f'<div class="chat-bubble bot"><div class="answer-text">{context}</div></div>',
-            unsafe_allow_html=True,
+        from collections import defaultdict
+
+        grouped = defaultdict(list)
+
+        for text, score, source in kept:
+            grouped[source].append((text, score))
+
+        for source, items in grouped.items():
+            combined_text = "\n\n".join(text for text, score in items)
+            best_score = min(score for text, score in items)
+
+            st.markdown(
+                f"""
+                <div class="chat-bubble bot">
+                     <b>Source:</b> {source}<br><br>
+                     <div class="answer-text">{combined_text}</div>
+                </div>
+                """,
+                unsafe_allow_html=True,
         )
 
     # Optional sources
     if show_context:
         with st.expander("Sources (retrieved context)"):
-            for t, s in kept:
+            for t, s, source in kept:
+                st.write(f"Source: {source}")
                 st.write(f"Score: {s:.4f}")
                 st.code(t)
                 st.divider()

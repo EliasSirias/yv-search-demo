@@ -2,6 +2,7 @@ docs/
 .env
 __pycache__/
 .ipynb_checkpoints/
-*.pdf
+venv/
 .venv/
+*.pyc
 .env
