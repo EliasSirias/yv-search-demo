@@ -13,33 +13,18 @@ import re
 from pathlib import Path
 import pytesseract
 
+
 from langchain_openai import ChatOpenAI
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.vectorstores import FAISS
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_core.documents import Document
+
 # llm = ChatOpenAI(model="gpt-4.1-mini", temperature=0)  # solid + cheap-ish
-
-
-def generate_answer(question: str, context: str) -> str:
-    prompt = f"""
-You are a technical support assistant.
-Answer the question using ONLY the documentation context.
-If the answer cannot be found in the context, respond with exactly:
-"I can't find this information in the provided documentation."
-
-Context:
-\"\"\"
-{context}
-\"\"\"
-
-Question: {question}
-
-Answer:
-""".strip()
-
-    return llm.invoke(prompt).content.strip()
-
+# --------------------------------------------------
+# Future Phase:
+# Optional AI Summary (currently disabled)
+# --------------------------------------------------
 
 # Tesseract path
 pytesseract.pytesseract.tesseract_cmd = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
@@ -133,15 +118,24 @@ NOT_FOUND_MESSAGE = (
     "If needed, escalate to the appropriate team members."
 )
 
+knowledge_base_filter = st.sidebar.selectbox(
+    "Search in",
+    options=["All", "Generic", "Work", "Sample"],
+    index=0,
+)
+
 st.sidebar.header("Settings")
 k = st.sidebar.slider("Top-K retrieved chunks", 1, 4, 2)
 min_hit_count = st.sidebar.slider("Min matching chunks required", 1, 4, 1)
 # For LangChain FAISS, score is often L2 distance (lower = better). Tune as needed.
 
 show_context = st.sidebar.checkbox("Show retrieved context", value=False)
-use_llm = st.sidebar.checkbox(
-    "Answer generation is optional; sources remain available.", value=False
-)
+# --------------------------------------------------
+# Future Phase:
+# Optional AI Summary (currently disabled)
+# --------------------------------------------------
+use_llm = False
+
 st.sidebar.caption("Default strictness tuned for documentation accuracy (1.25)")
 DEFAULT_MAX_DISTANCE = 1.25
 max_distance = st.sidebar.slider(
@@ -229,8 +223,12 @@ def extract_text_from_pdf(pdf_path: str) -> str:
 
 
 # -------------------------------
-# Per File Document Helper
+# Embeddings and Vector Store
 # -------------------------------
+def get_embeddings():
+    return HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
+
+
 def build_vectorstore_from_documents(documents):
     splitter = RecursiveCharacterTextSplitter(
         chunk_size=600,
@@ -239,14 +237,24 @@ def build_vectorstore_from_documents(documents):
     )
 
     chunks = splitter.split_documents(documents)
-
-    embeddings = HuggingFaceEmbeddings(
-        model_name="sentence-transformers/all-MiniLM-L6-v2"
-    )
+    embeddings = get_embeddings()
 
     vs = FAISS.from_documents(chunks, embeddings)
+    vs.save_local(str(INDEX_PATH))
 
     return vs, chunks
+
+
+def load_vectorstore():
+    embeddings = get_embeddings()
+
+    return FAISS.load_local(
+        str(INDEX_PATH),
+        embeddings,
+        allow_dangerous_deserialization=True,
+    )
+
+
 # -------------------------------
 # Build Vector Store
 # -------------------------------
@@ -260,13 +268,20 @@ import streamlit as st
 
 BASE_DIR = Path(__file__).resolve().parent
 DOCS_DIR = BASE_DIR / "docs"
+INDEX_PATH = BASE_DIR / "faiss_index"
+
+INDEX_FAISS_FILE = INDEX_PATH / "index.faiss"
+INDEX_METADATA_FILE = INDEX_PATH / "index.pkl"
 
 SUPPORTED_EXTENSIONS = [".pdf", ".txt", ".md"]
 
 DOC_PATHS = sorted(
-    p for p in DOCS_DIR.iterdir()
+    p
+    for p in DOCS_DIR.rglob("*")
     if p.is_file() and p.suffix.lower() in SUPPORTED_EXTENSIONS
 )
+
+
 def extract_text_from_file(path: Path) -> str:
     suffix = path.suffix.lower()
 
@@ -277,6 +292,30 @@ def extract_text_from_file(path: Path) -> str:
         return path.read_text(encoding="utf-8", errors="ignore")
 
     return ""
+
+
+def load_full_document(relative_path: str) -> str:
+    path = DOCS_DIR / relative_path
+
+    if not path.exists():
+        return "Document not found."
+
+    return extract_text_from_file(path)
+
+
+def format_source_name(filename: str) -> str:
+    name = Path(filename).stem
+
+    for prefix in ("TS_", "HT_"):
+        if name.startswith(prefix):
+            name = name[len(prefix) :]
+
+    name = name.replace("_", " ").replace("-", " ")
+
+    name = re.sub(r"\s+", " ", name).strip()
+
+    return name.title()
+
 
 st.session_state.setdefault("vectorstore", None)
 st.session_state.setdefault("chunks", None)
@@ -297,10 +336,20 @@ if st.session_state.vectorstore is None:
             text = extract_text_from_file(path)
 
             if text.strip():
+                relative_path = path.relative_to(DOCS_DIR)
+                parts = relative_path.parts
+
                 documents.append(
                     Document(
                         page_content=text,
-                        metadata={"source": path.name}
+                        metadata={
+                            "source": path.name,
+                            "relative_path": str(relative_path),
+                            "knowledge_base": parts[0],
+                            "category": (
+                                parts[1] if len(parts) > 2 else "Uncategorized"
+                            ),
+                        },
                     )
                 )
 
@@ -308,24 +357,31 @@ if st.session_state.vectorstore is None:
             st.error("Very little text detected in your documents.")
             st.stop()
 
-        vs, chunks = build_vectorstore_from_documents(documents)
+        if INDEX_FAISS_FILE.exists() and INDEX_METADATA_FILE.exists():
+            vs = load_vectorstore()
+            chunks = list(vs.docstore._dict.values())
+
+            st.success(f"Saved knowledge index loaded ✅ ({len(chunks)} chunks)")
+        else:
+            vs, chunks = build_vectorstore_from_documents(documents)
+
+            st.success(
+                f"Knowledge base indexed and saved ✅ "
+                f"({len(chunks)} chunks from {len(documents)} readable files)"
+            )
 
         st.session_state.vectorstore = vs
         st.session_state.chunks = chunks
-
-        st.success(
-            f"Knowledge base loaded ✅ ({len(chunks)} chunks from {len(DOC_PATHS)} files)"
-        )
 # -------------------------------
 # Ask Question
 # -------------------------------
 with st.form("search_form"):
     question = st.text_input(
-        "Question",
-        placeholder="e.g., How do I sync data on mobile?"
+        "Question", placeholder="e.g., How do I sync data on mobile?"
     )
 
     submitted = st.form_submit_button("Ask MVP Search")
+
 
 def generate_answer(question: str, context: str) -> str:
     llm = ChatOpenAI(
@@ -355,11 +411,12 @@ if submitted and question:
     if st.session_state.vectorstore is None:
         st.error("Knowledge base not loaded.")
         st.stop()
+    candidate_k = max(k * 4, 10)
 
     docs_with_scores = st.session_state.vectorstore.similarity_search_with_score(
-        question, k=k
+        question,
+        k=candidate_k,
     )
-
     if not docs_with_scores:
         st.markdown(
             f'<div class="chat-bubble bot"><b>Bot:</b><br>{NOT_FOUND_MESSAGE}</div>',
@@ -368,19 +425,39 @@ if submitted and question:
         st.stop()
 
     kept = []
-    for d, score in docs_with_scores:
-        text = d.page_content.strip()
-        source = d.metadata.get("source","Unknown Source")
 
-        if text and score <= max_distance:
-            kept.append((text, score, source ))
+    for document, score in docs_with_scores:
+        text = document.page_content.strip()
+        source = document.metadata.get("source", "Unknown Source")
+        knowledge_base = document.metadata.get("knowledge_base", "Unknown")
+        category = document.metadata.get("category", "Uncategorized")
+        relative_path = document.metadata.get("relative_path", source)
+
+        matches_selected_base = (
+            knowledge_base_filter == "All" or knowledge_base == knowledge_base_filter
+        )
+
+        if text and score <= max_distance and matches_selected_base:
+            kept.append(
+                (
+                    text,
+                    score,
+                    source,
+                    knowledge_base,
+                    category,
+                    relative_path,
+                )
+            )
+
+        if len(kept) >= k:
+            break
 
     st.markdown(
         f'<div class="chat-bubble user"><b>You Asked:</b><br>{question}</div>',
         unsafe_allow_html=True,
     )
 
-    kept_texts = [t for t, _, _ in kept]
+    kept_texts = [t for t, _, _, _, _, _ in kept]
     passes_keywords = keyword_overlap_ok(question, kept_texts)
     passes_scope = scope_coverage_ok(question, kept_texts)
     passes_multi = multi_intent_coverage_ok(question, kept_texts)
@@ -413,7 +490,7 @@ if submitted and question:
         st.stop()
 
     # Build context once
-    context = "\n\n".join(t for t, _, _ in kept)
+    context = "\n\n".join(t for t, _, _, _, _, _ in kept)
 
     # Optional LLM generation with safe fallback
     answer = None
@@ -439,30 +516,67 @@ if submitted and question:
         )
         from collections import defaultdict
 
-        grouped = defaultdict(list)
+    best_score = min(score for _, score, _, _, _, _ in kept)
 
-        for text, score, source in kept:
-            grouped[source].append((text, score))
-
-        for source, items in grouped.items():
-            combined_text = "\n\n".join(text for text, score in items)
-            best_score = min(score for text, score in items)
-
-            st.markdown(
-                f"""
-                <div class="chat-bubble bot">
-                     <b>Source:</b> {source}<br><br>
-                     <div class="answer-text">{combined_text}</div>
-                </div>
-                """,
-                unsafe_allow_html=True,
+    if best_score <= 1.00:
+        confidence_label = "High confidence"
+        confidence_message = "I found documentation that closely matches your question."
+    else:
+        confidence_label = "Possible match"
+        confidence_message = (
+            "I found related documentation that may help, "
+            "but it may not fully answer your question."
         )
+
+    st.markdown(f"**{confidence_label}:** {confidence_message}")
+
+    grouped = defaultdict(list)
+
+    for text, score, source, knowledge_base, category, relative_path in kept:
+        grouped[relative_path].append(
+            {
+                "text": text,
+                "score": score,
+                "source": source,
+                "knowledge_base": knowledge_base,
+                "category": category,
+            }
+        )
+
+    for relative_path, items in grouped.items():
+        source = items[0]["source"]
+        knowledge_base = items[0]["knowledge_base"]
+        category = items[0]["category"]
+
+        display_source = format_source_name(source)
+        combined_text = "\n\n".join(item["text"] for item in items)
+
+        st.markdown(
+            f"""
+            <div class="chat-bubble bot">
+                <b>Source:</b> {display_source}<br>
+                <b>Knowledge Base:</b> {knowledge_base}<br>
+                <b>Category:</b> {category}<br><br>
+                <div class="answer-text">{combined_text}</div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+        with st.expander("📄 View Full Document"):
+            full_document = load_full_document(relative_path)
+            st.markdown(
+                f'<div class="answer-text">{full_document}</div>',
+                unsafe_allow_html=True,
+            )
 
     # Optional sources
     if show_context:
         with st.expander("Sources (retrieved context)"):
-            for t, s, source in kept:
+            for t, s, source, knowledge_base, category, relative_path in kept:
                 st.write(f"Source: {source}")
+                st.write(f"Knowledge Base: {knowledge_base}")
+                st.write(f"Category: {category}")
                 st.write(f"Score: {s:.4f}")
                 st.code(t)
                 st.divider()

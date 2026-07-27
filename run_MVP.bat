@@ -1,5 +1,11 @@
 @echo off
-cd /d C:\Users\Elias Hsgovtech\MVP
-call venv\Scripts\activate
-venv\Scripts\python.exe -m streamlit run app.py
+cd /d "%~dp0"
+
+if not exist ".venv\Scripts\python.exe" (
+    echo Virtual environment not found.
+    pause
+    exit /b
+)
+
+.venv\Scripts\python.exe -m streamlit run app.py
 pause
