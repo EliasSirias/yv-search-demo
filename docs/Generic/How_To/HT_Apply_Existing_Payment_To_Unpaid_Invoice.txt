@@ -1,0 +1,35 @@
+Title: Applying an existing payment to an unpaid invoice
+
+Issue:
+An invoice remains unpaid even though a payment has already been received.
+
+Keywords:
+payment, invoice, unpaid invoice, payment allocation, payment application, receipt, financial account, accounts receivable
+
+Problem:
+A payment has been successfully recorded, but it has not been associated with the invoice that remains unpaid.
+
+Expected:
+The payment is associated with the appropriate invoice and the invoice reflects a Paid status.
+
+Actual:
+The account balance may be correct, but the invoice continues to display as unpaid.
+
+Cause:
+The payment has not been applied or allocated to the fee or transaction associated with the invoice.
+
+How To:
+1. Open the customer or financial account associated with the payment.
+2. Locate the existing payment or receipt.
+3. Review the payment application or allocation details.
+4. Select the unpaid fee, charge, or invoice that should receive the payment.
+5. Save or confirm the payment allocation.
+6. Verify the invoice now reflects the payment and displays the appropriate status.
+
+Resolution:
+Applying the payment to the correct fee or transaction associates it with the invoice and updates the invoice status.
+
+Notes:
+- Verify the correct invoice before applying the payment.
+- Ensure the payment has not already been applied to another transaction.
+- Confirm the account balance and invoice status after saving the changes.

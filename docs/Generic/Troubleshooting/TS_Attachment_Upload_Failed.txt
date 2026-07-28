@@ -1,0 +1,38 @@
+Title: Attachment upload failed
+
+Issue:
+Users cannot upload files or images to a record.
+
+Keywords:
+attachment, upload, file, image, document, storage
+
+Problem:
+File uploads fail or never appear on the record.
+
+Expected:
+Attachments upload successfully and are associated with the record.
+
+Actual:
+Upload fails or attachment is missing.
+
+Possible Causes:
+- Unsupported file type
+- File exceeds size limits
+- Network interruption
+- Storage unavailable
+- Insufficient user permissions
+
+Troubleshooting Steps:
+1. Verify the file type is supported.
+2. Confirm the file size is within limits.
+3. Retry the upload.
+4. Verify storage services are available.
+5. Check user permissions.
+6. Review application logs for upload errors.
+
+Resolution:
+Correcting the underlying upload restriction or storage issue restored attachment uploads.
+
+Notes:
+- Large files may require additional upload time.
+- Network interruptions commonly cause partial uploads.

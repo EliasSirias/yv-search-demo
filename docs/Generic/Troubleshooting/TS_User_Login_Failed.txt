@@ -1,0 +1,39 @@
+Title: User unable to log in
+
+Issue:
+A user cannot access the application using their account credentials.
+
+Keywords:
+login, authentication, password, account locked, user access, sign in
+
+Problem:
+The user receives an error when attempting to log in or cannot access the system.
+
+Expected:
+The user successfully authenticates and accesses the application.
+
+Actual:
+Login fails or access is denied.
+
+Possible Causes:
+- Incorrect username or password
+- Account is disabled
+- Account is locked after failed login attempts
+- Authentication service unavailable
+- User lacks required access permissions
+
+Troubleshooting Steps:
+1. Verify the username is correct.
+2. Confirm the user is entering the correct password.
+3. Check whether the account is active.
+4. Determine whether the account has been locked.
+5. Reset the password if necessary.
+6. Verify authentication services are operational.
+7. Confirm the user belongs to the appropriate security groups.
+
+Resolution:
+Correcting account configuration or resetting credentials restored user access.
+
+Notes:
+- Multiple failed login attempts may temporarily lock an account.
+- Verify user permissions after restoring access.

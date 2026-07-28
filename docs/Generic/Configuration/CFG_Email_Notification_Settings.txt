@@ -1,0 +1,32 @@
+Title: Configuring email notification settings
+update update 2
+Issue:
+Email notifications are not being delivered as expected.
+
+Keywords:
+email, SMTP, notifications, mail server, configuration
+
+Problem:
+System-generated email notifications fail to send.
+
+Expected:
+Configured events generate email notifications.
+
+Actual:
+Notifications are delayed, missing, or fail entirely.
+
+Configuration Steps:
+1. Verify SMTP server settings.
+2. Confirm sender address configuration.
+3. Validate authentication credentials.
+4. Test outbound email delivery.
+5. Review notification templates.
+6. Save configuration changes.
+7. Send a test notification.
+
+Resolution:
+Correct SMTP configuration restored outbound email delivery.
+
+Notes:
+- Authentication failures commonly prevent email delivery.
+- Firewalls or spam filtering may also block messages.

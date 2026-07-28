@@ -1,0 +1,38 @@
+Title: Correcting a print form field mapping due to case-sensitive values
+
+Issue:
+A field value is not displaying correctly on a generated print form.
+
+Keywords:
+print form, field mapping, case sensitive, mapping, output field, print template, field value
+
+Problem:
+A mapped field is blank or displays incorrect data even though the record contains a value.
+
+Expected:
+The configured field displays the correct value on the generated print form.
+
+Actual:
+The field is blank because the mapping references an incorrect value.
+
+Cause:
+The mapped value is case-sensitive and does not exactly match the value stored on the record.
+
+Troubleshooting Steps:
+1. Open the Print Form configuration.
+2. Edit the affected printable.
+3. Locate the field mapping that is not displaying correctly.
+4. Verify the output field being referenced.
+5. Open the source form or utility where the value is stored.
+6. Compare the stored value with the value referenced in the mapping.
+7. Correct any capitalization differences.
+8. Save the field mapping.
+9. Generate a new print form to verify the field now displays correctly.
+
+Resolution:
+Updating the mapping to match the exact stored value restored the field on the print form.
+
+Notes:
+- Field values may be case-sensitive.
+- Verify spelling, capitalization, and spacing when troubleshooting mappings.
+- If the value is configurable, confirm it matches the current configuration rather than older documentation.

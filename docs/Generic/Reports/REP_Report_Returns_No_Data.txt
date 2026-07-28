@@ -1,0 +1,38 @@
+Title: Report returns no data
+
+Issue:
+A report executes successfully but returns no records.
+
+Keywords:
+report, filters, date range, no data, reporting
+
+Problem:
+Users expect report results but receive an empty report.
+
+Expected:
+Matching records appear based on report filters.
+
+Actual:
+The report returns zero rows.
+
+Possible Causes:
+- Date range excludes matching records
+- Incorrect filter values
+- Missing report permissions
+- Data has not yet been generated
+- Report configuration is incorrect
+
+Troubleshooting Steps:
+1. Verify the selected date range.
+2. Review all report filters.
+3. Confirm matching records exist.
+4. Verify user permissions.
+5. Test the report using broader criteria.
+6. Review report configuration if necessary.
+
+Resolution:
+Adjusting report filters or correcting configuration restored expected report results.
+
+Notes:
+- Date filters are the most common cause of empty reports.
+- Test with known records when validating report behavior.

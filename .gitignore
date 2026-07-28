@@ -1,4 +1,3 @@
-docs/
 .env
 __pycache__/
 .ipynb_checkpoints/
@@ -6,3 +5,5 @@ venv/
 .venv/
 *.pyc
 .env
+faiss_index/
+docs/Work/

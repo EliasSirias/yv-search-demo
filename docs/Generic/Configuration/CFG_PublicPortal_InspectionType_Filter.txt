@@ -1,0 +1,49 @@
+Title: Adding an inspection type to a public portal results filter
+
+Issue:
+A valid inspection type is missing from the public-facing inspection results.
+
+Keywords:
+public portal, inspection type, advanced query, result constraints, inspection results, filter configuration, public results
+
+Problem:
+Certain inspections exist in the system but do not appear on the public portal because their inspection type is excluded from the results filter.
+
+Expected:
+All approved inspection types included in the filter are displayed in public inspection results.
+
+Actual:
+An inspection type is missing from the public-facing results.
+
+Cause:
+The inspection type is not included in the advanced query result constraints.
+
+Configuration Steps:
+1. Open the administration tools.
+2. Navigate to the public portal management area.
+3. Open the advanced query configuration.
+4. Locate the query used for public inspection results.
+5. Open the Result Constraints section.
+6. Find the filter that controls inspection types.
+
+Example existing filter:
+
+inspectionType IN('Routine','Re-Inspection')
+
+7. Add the missing inspection type to the list.
+
+Example updated filter:
+
+inspectionType IN('Routine','Re-Inspection','Opening')
+
+8. Save the configuration changes.
+9. Open the public portal and verify that records with the newly added inspection type now appear.
+
+Resolution:
+Adding the missing inspection type to the result constraints allowed those inspections to display in the public-facing results.
+
+Notes:
+- Use the exact stored inspection type value.
+- Preserve the existing quotation marks, commas, and parentheses.
+- Test the public results after saving.
+- Only inspection types approved for public display should be included.
