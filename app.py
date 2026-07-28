@@ -12,9 +12,10 @@ import pdfplumber
 import re
 from pathlib import Path
 import pytesseract
+import hashlib
+import json
 
 
-from langchain_openai import ChatOpenAI
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.vectorstores import FAISS
 from langchain_huggingface import HuggingFaceEmbeddings
@@ -229,7 +230,44 @@ def get_embeddings():
     return HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
 
 
-def build_vectorstore_from_documents(documents):
+def calculate_docs_fingerprint(doc_paths: list[Path]) -> str:
+    hasher = hashlib.sha256()
+
+    for path in sorted(doc_paths):
+        relative_path = path.relative_to(DOCS_DIR)
+
+        # Include the file path so renaming or moving a document changes the fingerprint.
+        hasher.update(str(relative_path).encode("utf-8"))
+
+        # Include the actual file contents so edits change the fingerprint.
+        with path.open("rb") as file:
+            while chunk := file.read(8192):
+                hasher.update(chunk)
+
+    return hasher.hexdigest()
+
+
+def save_fingerprint(fingerprint: str) -> None:
+    INDEX_PATH.mkdir(parents=True, exist_ok=True)
+
+    INDEX_FINGERPRINT_FILE.write_text(
+        json.dumps({"fingerprint": fingerprint}, indent=2),
+        encoding="utf-8",
+    )
+
+
+def load_saved_fingerprint() -> str | None:
+    if not INDEX_FINGERPRINT_FILE.exists():
+        return None
+
+    try:
+        data = json.loads(INDEX_FINGERPRINT_FILE.read_text(encoding="utf-8"))
+        return data.get("fingerprint")
+    except (json.JSONDecodeError, OSError):
+        return None
+
+
+def build_vectorstore_from_documents(documents, fingerprint):
     splitter = RecursiveCharacterTextSplitter(
         chunk_size=600,
         chunk_overlap=50,
@@ -241,7 +279,7 @@ def build_vectorstore_from_documents(documents):
 
     vs = FAISS.from_documents(chunks, embeddings)
     vs.save_local(str(INDEX_PATH))
-
+    save_fingerprint(fingerprint)
     return vs, chunks
 
 
@@ -272,6 +310,7 @@ INDEX_PATH = BASE_DIR / "faiss_index"
 
 INDEX_FAISS_FILE = INDEX_PATH / "index.faiss"
 INDEX_METADATA_FILE = INDEX_PATH / "index.pkl"
+INDEX_FINGERPRINT_FILE = INDEX_PATH / "fingerprint.json"
 
 SUPPORTED_EXTENSIONS = [".pdf", ".txt", ".md"]
 
@@ -357,16 +396,39 @@ if st.session_state.vectorstore is None:
             st.error("Very little text detected in your documents.")
             st.stop()
 
-        if INDEX_FAISS_FILE.exists() and INDEX_METADATA_FILE.exists():
+        current_fingerprint = calculate_docs_fingerprint(DOC_PATHS)
+        saved_fingerprint = load_saved_fingerprint()
+
+        index_files_exist = INDEX_FAISS_FILE.exists() and INDEX_METADATA_FILE.exists()
+
+        index_is_current = (
+            index_files_exist and saved_fingerprint == current_fingerprint
+        )
+
+        if index_is_current:
             vs = load_vectorstore()
-            chunks = list(vs.docstore._dict.values())
+            chunks = []
+
+            for doc_id in vs.index_to_docstore_id.values():
+                stored_doc = vs.docstore.search(doc_id)
+
+                if isinstance(stored_doc, Document):
+                    chunks.append(stored_doc)
 
             st.success(f"Saved knowledge index loaded ✅ ({len(chunks)} chunks)")
         else:
-            vs, chunks = build_vectorstore_from_documents(documents)
+            vs, chunks = build_vectorstore_from_documents(
+                documents,
+                current_fingerprint,
+            )
+
+            if index_files_exist:
+                message = "Documents changed — knowledge index rebuilt and saved"
+            else:
+                message = "Knowledge base indexed and saved"
 
             st.success(
-                f"Knowledge base indexed and saved ✅ "
+                f"{message} ✅ "
                 f"({len(chunks)} chunks from {len(documents)} readable files)"
             )
 
@@ -383,27 +445,27 @@ with st.form("search_form"):
     submitted = st.form_submit_button("Ask MVP Search")
 
 
-def generate_answer(question: str, context: str) -> str:
-    llm = ChatOpenAI(
-        model="gpt-4o-mini",  # good cost/quality for demos
-        temperature=0.1,
-    )
+# def generate_answer(question: str, context: str) -> str:
+# llm = ChatOpenAI(
+#    model="gpt-4o-mini",  # good cost/quality for demos
+#    temperature=0.1,
+# )
 
-    system = (
-        "You are a documentation assistant. "
-        "Answer ONLY using the provided documentation context. "
-        "If the answer is not clearly supported by the context, say you don't have enough information."
-    )
+# system = (
+#    "You are a documentation assistant. "
+#    "Answer ONLY using the provided documentation context. "
+#    "If the answer is not clearly supported by the context, say you don't have enough information."
+# )
 
-    user = f"""Question:
-{question}
+# user = f"""Question:
+# {question}
 
-Documentation context:
-{context}
+# Documentation context:
+# {context}
 
-Return a concise answer (3-6 sentences). If steps exist, use bullets."""
-    resp = llm.invoke([("system", system), ("user", user)])
-    return resp.content.strip()
+# Return a concise answer (3-6 sentences). If steps exist, use bullets."""
+# resp = llm.invoke([("system", system), ("user", user)])
+# return resp.content.strip()
 
 
 # if st.button("Ask YV Search") and question:
@@ -427,7 +489,12 @@ if submitted and question:
     kept = []
 
     for document, score in docs_with_scores:
-        text = document.page_content.strip()
+        page_content = document.page_content
+
+        if isinstance(page_content, str):
+            text = page_content.strip()
+        else:
+            text = str(page_content).strip()
         source = document.metadata.get("source", "Unknown Source")
         knowledge_base = document.metadata.get("knowledge_base", "Unknown")
         category = document.metadata.get("category", "Uncategorized")
@@ -492,16 +559,9 @@ if submitted and question:
     # Build context once
     context = "\n\n".join(t for t, _, _, _, _, _ in kept)
 
-    # Optional LLM generation with safe fallback
+    # Phase 2:
+    # Add agent-driven answer generation on top of search_docs().
     answer = None
-    if use_llm:
-        try:
-            answer = generate_answer(question, context)
-        except Exception:
-            st.sidebar.warning(
-                "Answer generation temporarily unavailable — showing sources only."
-            )
-            answer = None
 
     # Render answer OR retrieved context
     if answer and answer.strip():
