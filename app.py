@@ -9,6 +9,8 @@ from rag_core import search_docs
 from index_manager import load_or_build_index, load_full_document
 from ui_helpers import format_source_name, group_results_by_path
 from agent import build_support_agent
+from feedback import save_feedback
+from config import MAX_DISTANCE
 
 st.set_page_config(page_title="MVP (Demo)", page_icon="🔎")
 # st.set_page_config(page_title="YV Search (Demo)", page_icon="🔎")
@@ -130,7 +132,7 @@ with st.sidebar.expander("Developer Settings"):
         """,
         unsafe_allow_html=True,
     )
-
+    show_diagnostics = st.checkbox("Show Retrieval Diagnostics", value=False)
 use_llm = False
 
 
@@ -240,6 +242,11 @@ if submitted and question:
         min_hit_count=min_hit_count,
         max_distance=max_distance,
     )
+    st.session_state["last_question"] = question
+    st.session_state["last_results"] = results
+if "last_results" in st.session_state:
+    results = st.session_state["last_results"]
+    question = st.session_state["last_question"]
     st.markdown(
         f'<div class="chat-bubble user"><b>You Asked:</b><br>{question}</div>',
         unsafe_allow_html=True,
@@ -275,7 +282,7 @@ if submitted and question:
     st.markdown(f"**{confidence['label']}:** {confidence['message']}")
 
     grouped = group_results_by_path(kept)
-    for relative_path, items in grouped.items():
+    for index, (relative_path, items) in enumerate(grouped.items(), start=1):
 
         source = items[0]["source"]
         knowledge_base = items[0]["knowledge_base"]
@@ -294,6 +301,58 @@ if submitted and question:
         """,
             unsafe_allow_html=True,
         )
+        feedback_key = f"feedback_{relative_path}_{index}"
+
+        if feedback_key not in st.session_state:
+            st.session_state[feedback_key] = False
+
+        if not st.session_state[feedback_key]:
+            feedback_col1, feedback_col2 = st.columns(2)
+
+            with feedback_col1:
+                if st.button(
+                    "👍 Helpful",
+                    key=f"helpful_{relative_path}_{index}",
+                ):
+                    save_feedback(
+                        question=question,
+                        source=source,
+                        relative_path=relative_path,
+                        rank=index,
+                        confidence=confidence["label"],
+                        helpful=True,
+                    )
+
+                    st.session_state[feedback_key] = True
+
+            with feedback_col2:
+                if st.button(
+                    "👎 Not helpful",
+                    key=f"not_helpful_{relative_path}_{index}",
+                ):
+                    save_feedback(
+                        question=question,
+                        source=source,
+                        relative_path=relative_path,
+                        rank=index,
+                        confidence=confidence["label"],
+                        helpful=False,
+                    )
+
+                    st.session_state[feedback_key] = True
+            if show_diagnostics:
+                st.markdown("### 🔧 Retrieval Diagnostics")
+
+                best_score = min(item["score"] for item in items)
+
+                st.write(f"**Result Index:** {index}")
+                st.write(f"**Best Score:** {best_score:.3f}")
+                st.write(f"**Max Distance:** {MAX_DISTANCE:.2f}")
+                st.write(f"**Confidence:** {confidence['label']}")
+                st.write(f"**Items Retrieved:** {len(items)}")
+
+                for chunk_index, item in enumerate(items, start=1):
+                    st.write(f"**Chunk Scores:** {chunk_index}: {item['score']:.3f}")
 
         with st.expander("📄 View Full Document"):
             full_document = load_full_document(relative_path)
@@ -302,7 +361,6 @@ if submitted and question:
                 f'<div class="answer-text">{full_document}</div>',
                 unsafe_allow_html=True,
             )
-
     # Render answer OR retrieved context
 
     # Optional sources

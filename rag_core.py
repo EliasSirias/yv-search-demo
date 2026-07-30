@@ -1,5 +1,8 @@
 import re
 from typing import Any
+from config import MAX_DISTANCE
+
+max_distance = MAX_DISTANCE
 
 
 def keyword_overlap_ok(question: str, kept_texts: list[str]) -> bool:
@@ -125,7 +128,7 @@ def search_docs(
     best_score = min(item["score"] for item in kept)
     if best_score <= 1.00:
         confidence_label = "High confidence"
-        confidence_message = "I found documentation that closely matches your question."
+        confidence_message = "Documentation closely matches your question."
     else:
         confidence_label = "Possible match"
         confidence_message = (

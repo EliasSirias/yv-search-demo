@@ -1,0 +1,3 @@
+MAX_DISTANCE = 1.25
+TOP_K = 4
+MIN_HITS = 1
