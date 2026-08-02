@@ -11,6 +11,7 @@ from ui_helpers import format_source_name, group_results_by_path
 from agent import build_support_agent
 from feedback import save_feedback
 from config import MAX_DISTANCE
+from llm import generate_answer
 
 st.set_page_config(page_title="MVP (Demo)", page_icon="🔎")
 # st.set_page_config(page_title="YV Search (Demo)", page_icon="🔎")
@@ -83,6 +84,23 @@ st.markdown(
 .chat-bubble.bot {
     background: rgba(46, 204, 113, 0.10);
 }
+/* LLM Formatting */
+.answer-title{
+    font-weight:600;
+    margin-bottom:10px;
+    font-size:1.02rem;
+}
+
+.answer-text{
+    line-height:1.6;
+    white-space:pre-wrap;
+}
+.answer-subtitle{
+    color:#666;
+    font-size:.85rem;
+    margin-bottom:15px;
+    font-style:italic;
+}
 </style>
 
 """,
@@ -133,7 +151,13 @@ with st.sidebar.expander("Developer Settings"):
         unsafe_allow_html=True,
     )
     show_diagnostics = st.checkbox("Show Retrieval Diagnostics", value=False)
-use_llm = False
+
+    st.markdown("### 🤖 AI Settings")
+    use_llm = st.toggle(
+        "Generate AI Answer",
+        value=False,
+        help="Generate a grounded answer using the retrieved documentation.",
+    )
 
 
 # -------------------------------
@@ -190,43 +214,6 @@ with st.form("search_form"):
 # The agent will decide when to call search_docs()
 # and generate grounded responses from retrieved context.
 # --------------------------------------------------
-# if "support_agent" not in st.session_state:
-#     st.session_state.support_agent = build_support_agent(
-#         vectorstore=st.session_state.vectorstore,
-#         knowledge_base_filter=knowledge_base_filter,
-#         k=k,
-#         min_hit_count=min_hit_count,
-#         max_distance=max_distance,
-#     )
-
-# if st.button("Test Agent") and question:
-#     response = st.session_state.support_agent.invoke(
-#         {
-#             "messages": [
-#                 {
-#                     "role": "user",
-#                     "content": question,
-#                 }
-#             ]
-#         }
-#     )
-
-#     final_message = response["messages"][-1]
-#     answer = final_message.content
-
-#     if not isinstance(answer, str):
-#         answer = str(answer)
-
-#     st.markdown(
-#         f"""
-# <div class="chat-bubble bot">
-# <b>Assistant:</b><br>
-# <div class="answer-text">{answer}</div>
-# </div>
-# """,
-#         unsafe_allow_html=True,
-#   )
-
 
 # if st.button("Ask YV Search") and question:
 if submitted and question:
@@ -264,14 +251,9 @@ if "last_results" in st.session_state:
     # Build context once
     # Phase 2:
     # Add agent-driven answer generation on top of search_docs().
-    st.markdown(
-        """
-            <div class="chat-bubble bot bot-header">
-                Supporting Documentation
-            </div>
-            """,
-        unsafe_allow_html=True,
-    )
+    # Optional LLM Answer
+
+    # Render answer OR retrieved context
     if confidence["label"] == "High confidence":
         confidence_icon = "🟢"
     elif confidence["label"] == "Possible match":
@@ -279,97 +261,124 @@ if "last_results" in st.session_state:
     else:
         confidence_icon = "🔴"
 
-    st.markdown(f"**{confidence['label']}:** {confidence['message']}")
+    with st.container(border=True):
 
-    grouped = group_results_by_path(kept)
-    for index, (relative_path, items) in enumerate(grouped.items(), start=1):
+        if use_llm and kept:
 
-        source = items[0]["source"]
-        knowledge_base = items[0]["knowledge_base"]
-        category = items[0]["category"]
+            context = "\n\n".join(chunk["text"] for chunk in kept)
 
-        display_source = format_source_name(source)
-        combined_text = "\n\n".join(item["text"] for item in items)
+            answer = generate_answer(
+                question=question,
+                context=context,
+            )
+
+            st.subheader("🤖 Grounded AI Response")
+            st.markdown(f"### {confidence_icon} {confidence['label']}")
+            st.caption("Generated using only the supporting documentation below.")
+
+            st.markdown(answer)
+            st.divider()
+        st.subheader("📄 Supporting Documentation")
         st.markdown(
-            f"""
-        <div class="chat-bubble bot">
-            <b>📄Source:</b> {display_source}<br>
-            <b>📚Knowledge Base:</b> {knowledge_base}<br>
-            <b>🏷 Category:</b> {category}<br><br>
-            <div class="answer-text">{combined_text}</div>
-        </div>
-        """,
-            unsafe_allow_html=True,
+            f"**{confidence_icon} {confidence['label']}:** {confidence['message']}"
         )
-        feedback_key = f"feedback_{relative_path}_{index}"
 
-        if feedback_key not in st.session_state:
-            st.session_state[feedback_key] = False
+        grouped = group_results_by_path(kept)
+        for index, (relative_path, items) in enumerate(grouped.items(), start=1):
 
-        if not st.session_state[feedback_key]:
-            feedback_col1, feedback_col2 = st.columns(2)
+            source = items[0]["source"]
+            knowledge_base = items[0]["knowledge_base"]
+            category = items[0]["category"]
 
-            with feedback_col1:
-                if st.button(
-                    "👍 Helpful",
-                    key=f"helpful_{relative_path}_{index}",
-                ):
-                    save_feedback(
-                        question=question,
-                        source=source,
-                        relative_path=relative_path,
-                        rank=index,
-                        confidence=confidence["label"],
-                        helpful=True,
-                    )
-
-                    st.session_state[feedback_key] = True
-
-            with feedback_col2:
-                if st.button(
-                    "👎 Not helpful",
-                    key=f"not_helpful_{relative_path}_{index}",
-                ):
-                    save_feedback(
-                        question=question,
-                        source=source,
-                        relative_path=relative_path,
-                        rank=index,
-                        confidence=confidence["label"],
-                        helpful=False,
-                    )
-
-                    st.session_state[feedback_key] = True
-            if show_diagnostics:
-                st.markdown("### 🔧 Retrieval Diagnostics")
-
-                best_score = min(item["score"] for item in items)
-
-                st.write(f"**Result Index:** {index}")
-                st.write(f"**Best Score:** {best_score:.3f}")
-                st.write(f"**Max Distance:** {MAX_DISTANCE:.2f}")
-                st.write(f"**Confidence:** {confidence['label']}")
-                st.write(f"**Items Retrieved:** {len(items)}")
-
-                for chunk_index, item in enumerate(items, start=1):
-                    st.write(f"**Chunk Scores:** {chunk_index}: {item['score']:.3f}")
-
-        with st.expander("📄 View Full Document"):
-            full_document = load_full_document(relative_path)
-
+            display_source = format_source_name(source)
+            combined_text = "\n\n".join(item["text"] for item in items)
             st.markdown(
-                f'<div class="answer-text">{full_document}</div>',
+                f"""
+            <div class="chat-bubble bot">
+                <b>📄Source:</b> {display_source}<br>
+                <b>📚Knowledge Base:</b> {knowledge_base}<br>
+                <b>🏷 Category:</b> {category}<br><br>
+                <div class="answer-text">{combined_text}</div>
+            </div>
+            """,
                 unsafe_allow_html=True,
             )
-    # Render answer OR retrieved context
+            feedback_key = f"feedback_{relative_path}_{index}"
 
-    # Optional sources
-    if show_context:
-        with st.expander("Sources (retrieved context)"):
-            for item in kept:
-                st.write(f'Source: {item["source"]}')
-                st.write(f'Knowledge Base: {item["knowledge_base"]}')
-                st.write(f'Category: {item["category"]}')
-                st.write(f'Score: {item["score"]:.4f}')
-                st.code(item["text"])
-                st.divider()
+            if feedback_key not in st.session_state:
+                st.session_state[feedback_key] = False
+
+            if not st.session_state[feedback_key]:
+                feedback_col1, feedback_col2 = st.columns(2)
+
+                with feedback_col1:
+                    if st.button(
+                        "👍 Helpful",
+                        key=f"helpful_{relative_path}_{index}",
+                    ):
+                        save_feedback(
+                            question=question,
+                            source=source,
+                            relative_path=relative_path,
+                            rank=index,
+                            confidence=confidence["label"],
+                            helpful=True,
+                        )
+
+                        st.session_state[feedback_key] = True
+                        st.rerun()
+                with feedback_col2:
+                    if st.button(
+                        "👎 Not helpful",
+                        key=f"not_helpful_{relative_path}_{index}",
+                    ):
+                        save_feedback(
+                            question=question,
+                            source=source,
+                            relative_path=relative_path,
+                            rank=index,
+                            confidence=confidence["label"],
+                            helpful=False,
+                        )
+
+                        st.session_state[feedback_key] = True
+                        st.rerun()
+
+            if show_diagnostics:
+                with st.expander(
+                    f"🔧 Retrieval Diagnostics — Result {index}",
+                    expanded=False,
+                ):
+
+                    best_score = min(item["score"] for item in items)
+
+                    st.write(f"**Result Index:** {index}")
+                    st.write(f"**Best Distance Score:** {best_score:.3f}")
+                    st.write(f"**Configured Default:** {MAX_DISTANCE:.2f}")
+                    st.write(f"**Current Search Threshold:** {max_distance:.2f}")
+                    st.write(f"**Confidence:** {confidence['label']}")
+                    st.write(f"**Chunks Combined:** {len(items)}")
+
+                    for chunk_index, item in enumerate(items, start=1):
+                        st.write(
+                            f"**Chunk {chunk_index} Scores:**" f"{item['score']:.3f}"
+                        )
+
+            with st.expander("📄 View Full Document"):
+                full_document = load_full_document(relative_path)
+
+                st.markdown(
+                    f'<div class="answer-text">{full_document}</div>',
+                    unsafe_allow_html=True,
+                )
+
+        # Optional sources
+        if show_context:
+            with st.expander("Sources (retrieved context)"):
+                for item in kept:
+                    st.write(f'Source: {item["source"]}')
+                    st.write(f'Knowledge Base: {item["knowledge_base"]}')
+                    st.write(f'Category: {item["category"]}')
+                    st.write(f'Score: {item["score"]:.4f}')
+                    st.code(item["text"])
+                    st.divider()
